@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -27,10 +26,11 @@ var (
 
 const listHeight = 15
 
-type itemDelegate struct{}
 type item string
 
 func (i item) FilterValue() string { return string(i) }
+
+type itemDelegate struct{}
 
 func (d itemDelegate) Height() int                             { return 1 }
 func (d itemDelegate) Spacing() int                            { return 0 }
@@ -43,21 +43,17 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 	str := fmt.Sprintf("%d. %s", index+1, i)
 
-	fn := itemStyle.Render
 	if index == m.Index() {
-		fn = func(s ...string) string {
-			return selectedItemStyle.Render("> " + strings.Join(s, " "))
-		}
+		str = "> " + str
+	} else {
+		str = "  " + str
 	}
 
-	fmt.Fprint(w, fn(str))
+	fmt.Fprint(w, str)
 }
 
 type model struct {
-	logGroups []string
-	// cursor    int
-	// logGroups list.Model
-	// ready     bool
+	logGroups list.Model
 }
 
 // func initialModel() model {
@@ -78,38 +74,33 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	//  	var (
-	//  		cmd tea.Cmd
-	//  	)
-	//
-	//  	switch msg := msg.(type) {
-	//  	case tea.KeyMsg:
-	//  		if m.logGroups.FilterState() == list.Filtering {
-	//  			break
-	//  		}
-	//  		if msg.String() == "q" {
-		// 			return m, tea.Quit
-		// 		}
-		// 	case tea.WindowSizeMsg:
-		// 		m.logGroups.SetWidth(msg.Width)
-		// 		m.logGroups.SetHeight(msg.Height)
-		// 		return m, nil
-		// 	}
-		// 	m.logGroups, cmd = m.logGroups.Update(msg)
-		//
-		// 	return m, cmd
-		//
-	return m, nil
+	var (
+		cmd tea.Cmd
+	)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !(m.logGroups.FilterState() == list.Filtering) {
+			switch msg.String() {
+
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+		}
+	}
+	m.logGroups, cmd = m.logGroups.Update(msg)
+
+	return m, cmd
 }
 
 func (m model) View() string {
-	return strings.Join(m.logGroups, "\n")
-	// return m.logGroups.View()
+	// return strings.Join(m.logGroups, "\n")
+	return m.logGroups.View()
 }
 
 func main() {
 
-	model := model{}
+	model := model{logGroups: list.New([]list.Item{}, itemDelegate{}, 20, 10)}
 	config, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("eu-west-1"))
 	if err != nil {
 		log.Fatalf("failed to load configuration, %v", err)
@@ -127,7 +118,7 @@ func main() {
 
 	paginator := cloudwatchlogs.NewDescribeLogGroupsPaginator(client, &cloudwatchlogs.DescribeLogGroupsInput{})
 
-	// groups := []list.Item{}
+	groups := []list.Item{}
 
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(context.Background())
@@ -135,14 +126,14 @@ func main() {
 			log.Fatalf("failed to list log groups, %v", err)
 		}
 		for _, logGroup := range output.LogGroups {
-			model.logGroups = append(model.logGroups, string(*logGroup.LogGroupName))
-			// groups = append(groups, item(string(*logGroup.LogGroupName)))
+			// model.logGroups = append(model.logGroups, string(*logGroup.LogGroupName))
+			groups = append(groups, item(string(*logGroup.LogGroupName)))
 		}
 	}
 
-	// model.logGroups.SetItems(groups)
+	model.logGroups.SetItems(groups)
 
-	btProg := tea.NewProgram(model)
+	btProg := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := btProg.Run(); err != nil {
 		log.Fatalf("failed to start program, %v", err)
